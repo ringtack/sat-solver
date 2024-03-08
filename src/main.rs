@@ -30,10 +30,11 @@ fn main() {
 
     // Initialize solver
     let mut cfg = SolverConfig::default();
-    // Whether to enable random stuff / restarts
+    // Whether to enable random stuff / restarts / prefer true in selections
     cfg.restart = true;
-    cfg.decision_policy.random_var = None;
-    cfg.decision_policy.random_pol = false;
+    // cfg.decision_policy.prefer_true = false;
+    // cfg.decision_policy.random_var = None;
+    // cfg.decision_policy.random_pol = false;
 
     info!("Starting solve attempt...");
     let mut solver = CDCLSolver::new(cfg, instance);
