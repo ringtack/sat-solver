@@ -4,7 +4,7 @@ use std::{cmp::Ordering, mem, ops::BitAnd, time::Instant};
 use fxhash::{FxHashMap, FxHashSet};
 use log::{debug, info};
 use mut_binary_heap::BinaryHeap;
-use ordered_float::OrderedFloat;
+use ordered_float::{OrderedFloat, Pow};
 use slotmap::basic::{Iter, IterMut};
 
 use crate::{
@@ -50,7 +50,7 @@ pub struct CDCLSolver {
     conf: OptConfig,
     dh_conf: DecisionConfig,
     cd_conf: ClauseDeletionConfig,
-    _rs_conf: RestartConfig,
+    rs_conf: RestartConfig,
 
     /// Variable/Literal metadata.
     ///
@@ -137,7 +137,7 @@ impl CDCLSolver {
             conf: c.opt_config(),
             dh_conf: c.decision_config(),
             cd_conf: c.clause_deletion_config(),
-            _rs_conf: c.restart_config(),
+            rs_conf: c.restart_config(),
             assigned: vec![LBool::Undef; n_vars],
             polarity: vec![false; n_vars],
             reasons: vec_with_size(n_vars, Reason::default()),
@@ -186,11 +186,24 @@ impl CDCLSolver {
     }
 
     pub fn solve(&mut self) -> SolveStatus {
+        loop {
+            self.stats.starts += 1;
+            let mut restart_lim = 0;
+            if self.rs_conf.restart {
+                restart_lim = self.luby();
+            }
+            debug!("Restarting execution with lim {restart_lim} (0 means infinite)");
+            let res = self.search(restart_lim);
+            if res != SolveStatus::Unknown {
+                return res;
+            }
+        }
+    }
+
+    pub fn search(&mut self, restart_lim: usize) -> SolveStatus {
         // Record stats
         let _n_conflicts = 0;
-        self.stats.starts += 1;
 
-        // TODO: integrate restarts into this
         loop {
             let conflict = self.propagate();
 
@@ -227,6 +240,13 @@ impl CDCLSolver {
                 // clauses; if we can't smplify further, formula is UNSAT
                 if self.decision_level == 0 && !self.simplify() {
                     return SolveStatus::UNSAT;
+                }
+
+                // If at restart limit for conflicts, restart
+                if restart_lim > 0 && self.stats.conflicts >= restart_lim as u64 {
+                    // Backtrack to base level
+                    self.backtrack(0);
+                    return SolveStatus::Unknown;
                 }
 
                 // Decide new variable
@@ -1139,6 +1159,29 @@ impl CDCLSolver {
         }
 
         true
+    }
+
+    /// Luby restart computation.
+    fn luby(&self) -> usize {
+        // Find subsequence for current number of restarts
+        let mut n_restarts = self.stats.starts;
+        let (mut sz, mut seq) = (1, 0);
+        while sz < n_restarts + 1 {
+            seq += 1;
+            sz = 2 * sz + 1;
+        }
+
+        while sz - 1 != n_restarts {
+            sz = (sz - 1) >> 1;
+            seq -= 1;
+            n_restarts = n_restarts % sz;
+        }
+
+        debug!(
+            "Luby: {}",
+            self.rs_conf.u * (self.rs_conf.scale.pow(seq) as usize)
+        );
+        self.rs_conf.u * (self.rs_conf.scale.pow(seq) as usize)
     }
 
     /// Statistics computations for activity, LBD, etc.

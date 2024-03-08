@@ -29,7 +29,12 @@ fn main() {
     let instance = dimacs_parser.parse().unwrap();
 
     // Initialize solver
-    let cfg = SolverConfig::default();
+    let mut cfg = SolverConfig::default();
+    // Whether to enable random stuff / restarts
+    cfg.restart = true;
+    cfg.decision_policy.random_var = None;
+    cfg.decision_policy.random_pol = false;
+
     info!("Starting solve attempt...");
     let mut solver = CDCLSolver::new(cfg, instance);
     let start = Instant::now();

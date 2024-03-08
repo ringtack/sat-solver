@@ -150,7 +150,7 @@ impl BitXor for LBool {
 // }
 
 // Status markers
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SolveStatus {
     Unknown,
     SAT,

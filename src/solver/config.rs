@@ -4,7 +4,7 @@ use ringbuf::HeapRb;
 use super::types::LBD;
 
 // Restart policy configs.
-pub const LUBY_DEFAULT: RestartPolicy = RestartPolicy::Luby(256);
+pub const LUBY_DEFAULT: RestartPolicy = RestartPolicy::Luby(256, 1.5);
 pub const GLUCOSE_DEFAULT: RestartPolicy = RestartPolicy::Glucose(50, 0.8, 5000, 1.4);
 
 // Clause deletion configs.
@@ -27,6 +27,9 @@ pub struct SolverConfig {
     pub verbosity: log::LevelFilter,
     /// Initial scaling factor for max learnt clauses relative to # clauses (default 1/3)
     pub max_learnt_f: f64,
+
+    /// Whether to restart
+    pub restart: bool,
 
     /// Whether to phase save on backtrack.
     pub save_phases: bool,
@@ -72,17 +75,21 @@ impl SolverConfig {
 
     pub fn restart_config(&self) -> RestartConfig {
         let mut rc = RestartConfig::default();
-        match self.restart_policy {
-            RestartPolicy::Luby(u) => {
-                rc.u = u as usize;
+        if self.restart {
+            rc.restart = true;
+            match self.restart_policy {
+                RestartPolicy::Luby(u, scale) => {
+                    rc.u = u as usize;
+                    rc.scale = scale;
+                }
+                RestartPolicy::Glucose(x_lbd_win, k, x_ass_win, r) => {
+                    rc.lbd_win = HeapRb::new(x_lbd_win as usize);
+                    rc.k = k;
+                    rc.ass_win = HeapRb::new(x_ass_win as usize);
+                    rc.r = r;
+                }
+                RestartPolicy::Rapid => unimplemented!("TODO: implement time permitting"),
             }
-            RestartPolicy::Glucose(x_lbd_win, k, x_ass_win, r) => {
-                rc.lbd_win = HeapRb::new(x_lbd_win as usize);
-                rc.k = k;
-                rc.ass_win = HeapRb::new(x_ass_win as usize);
-                rc.r = r;
-            }
-            RestartPolicy::Rapid => unimplemented!("TODO: implement time permitting"),
         }
         rc
     }
@@ -116,11 +123,13 @@ impl Default for SolverConfig {
             verbosity: log::max_level(),
             max_learnt_f: 1. / 3.,
 
+            restart: true,
             save_phases: true,
             remove_satisfied: true,
 
             // Policies
-            restart_policy: GLUCOSE_DEFAULT,
+            // restart_policy: GLUCOSE_DEFAULT,
+            restart_policy: LUBY_DEFAULT,
             deletion_policy: ClauseDeletionPolicy {
                 keep_bin_clauses: false,
                 keep_rec_clauses: false,
@@ -140,7 +149,8 @@ impl Default for SolverConfig {
 #[derive(Clone, Debug)]
 pub enum RestartPolicy {
     /// u: scaling factor
-    Luby(u64),
+    /// scale: scaling factor for each restart
+    Luby(u64, f64),
     /// X_rec_lbd: window size of recent learnt LBDs
     /// K: scaling factor to check if X_rec_lbd too large
     /// X_rec_ass: window size of recent values #(assigned literals during conflicts)
@@ -187,8 +197,8 @@ pub struct DecisionPolicy {
     heuristic: HeuristicOption,
     // Whether to randomly select branching literal (if so, the frequency), or its polarity.
     // default false for both
-    random_var: Option<f64>,
-    random_pol: bool,
+    pub random_var: Option<f64>,
+    pub random_pol: bool,
 }
 
 // Heuristic configs
@@ -261,6 +271,12 @@ pub struct ClauseDeletionConfig {
 
 // Restart config.
 pub struct RestartConfig {
+    /// Whether to restart.
+    pub restart: bool,
+
+    /// Scaling factor for each restart
+    pub scale: f64,
+
     /// Luby related restart values.
     ///
     /// Scaling factor for each Luby restart value.
@@ -287,6 +303,8 @@ pub struct RestartConfig {
 impl Default for RestartConfig {
     fn default() -> Self {
         Self {
+            restart: false,
+            scale: 0.,
             u: 0,
             lbd_win: HeapRb::new(1),
             avg_lbd_win: 0.,
