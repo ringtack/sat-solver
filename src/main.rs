@@ -13,23 +13,27 @@ mod solver;
 pub struct Args {
     /// File path of instance to parse
     #[arg(short, long)]
-    pub path: String,
+    pub file: String,
 
     /// Whether to restart
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = false)]
     pub restart: bool,
 
     /// Whether to prefer true in decisions
-    #[arg(short, long)]
-    pub prefer_true: bool,
+    #[arg(short, long, default_value_t = false)]
+    pub true_pref: bool,
 
     /// Whether to randomly decide vars (i.e. w/ what freq)
     #[arg(short, long, default_value_t = 0.0)]
-    pub rand_var: f64,
+    pub var_rand: f64,
 
     /// Whether to randomize polarity or remember it
-    #[arg(short, long)]
-    pub rand_pol: bool,
+    #[arg(short, long, default_value_t = false)]
+    pub pol_rand: bool,
+
+    /// Whether to run multithreaded (and how many cores)
+    #[arg(short, long, default_value_t = 1)]
+    pub mt: usize,
 }
 
 fn main() {
@@ -41,20 +45,22 @@ fn main() {
         .init();
 
     // Get instance
-    let dimacs_parser = DimacsParser::new(&args.path).unwrap();
+    let dimacs_parser = DimacsParser::new(&args.file).unwrap();
     let instance = dimacs_parser.parse().unwrap();
 
     // Initialize solver
     let mut cfg = SolverConfig::default();
     // Whether to enable random stuff / restarts / prefer true in selections
     cfg.restart = args.restart;
-    cfg.decision_policy.prefer_true = args.prefer_true;
-    cfg.decision_policy.random_var = if args.rand_var > 0. {
-        Some(args.rand_var)
+    cfg.decision_policy.prefer_true = args.true_pref;
+    cfg.decision_policy.random_var = if args.var_rand > 0. {
+        Some(args.var_rand)
     } else {
         None
     };
-    cfg.decision_policy.random_pol = args.rand_pol;
+    cfg.decision_policy.random_pol = args.pol_rand;
+
+    info!("Config: {:#?}", cfg);
 
     info!("Starting solve attempt...");
     let mut solver = CDCLSolver::new(cfg, instance);
@@ -75,7 +81,7 @@ fn main() {
         }
         solver::types::SolveStatus::UNSAT => println!("UNSAT"),
     }
-    let file = Path::new(&args.path).file_name().unwrap();
+    let file = Path::new(&args.file).file_name().unwrap();
     println!(
         "[{}] Status: {}\tElapsed: {:#?}",
         file.to_str().unwrap(),

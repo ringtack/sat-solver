@@ -302,8 +302,9 @@ impl CDCLSolver {
                     // Automatically drop learnt_c after bumping activity, since we won't need it
                     if {
                         let learnt_c = &mut self.ca[learnt_ck];
-                        // Set LBD of learnt clause
+                        // Set LBD of learnt clause, and mark protected
                         learnt_c.lbd = lbd;
+                        learnt_c.protected = true;
 
                         learnt_c.bump_activity(self.cd_conf.inc_var, self.cd_conf.rescale_lim)
                     } {
