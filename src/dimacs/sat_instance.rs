@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use fxhash::FxHashSet;
 
+#[derive(Clone)]
 pub struct SATInstance {
     pub n_vars: usize,
     pub n_clauses: usize,
@@ -24,6 +25,7 @@ impl Debug for SATInstance {
     }
 }
 
+#[derive(Clone)]
 pub struct Clause {
     pub lits: Vec<Literal>,
 }

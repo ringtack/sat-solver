@@ -24,7 +24,7 @@ pub const ACTIVITY_DELETION_DEFAULT: DeletionSortOption =
 pub const VSIDS_DEFAULT: HeuristicOption = HeuristicOption::VSIDS(256, 2);
 pub const EVSIDS_DEFAULT: HeuristicOption = HeuristicOption::EVSIDS(1.0, 1. / 0.95, 100);
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SolverConfig {
     /// Log filter. Set using `log::set_max_level().`
     pub verbosity: log::LevelFilter,

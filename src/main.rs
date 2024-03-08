@@ -1,6 +1,7 @@
-use std::{path::Path, time::Instant};
+use std::{path::Path, thread, time::Instant};
 
 use clap::Parser;
+use crossbeam::channel;
 use dimacs::parser::DimacsParser;
 use log::info;
 use solver::{cdcl_solver::CDCLSolver, config::SolverConfig};
@@ -62,11 +63,23 @@ fn main() {
 
     info!("Config: {:#?}", cfg);
 
-    info!("Starting solve attempt...");
-    let mut solver = CDCLSolver::new(cfg, instance);
-    let start = Instant::now();
-    let res = solver.solve();
-    let elapsed = start.elapsed();
+    // If multithreaded, spawn that many threads to send to a channel
+    let (s, r) = channel::unbounded();
+    for i in 0..args.mt {
+        info!("Starting solve attempt in solver {}...", i);
+        let s = s.clone();
+        let cfg = cfg.clone();
+        let instance = instance.clone();
+        thread::spawn(move || {
+            let mut solver = CDCLSolver::new(cfg, instance);
+            let start = Instant::now();
+            let res = solver.solve();
+            let elapsed = start.elapsed();
+            s.send((solver, res, elapsed)).unwrap();
+        });
+    }
+
+    let (solver, res, elapsed) = r.recv().unwrap();
     match res {
         solver::types::SolveStatus::Unknown => panic!("Solver should never return Unknown"),
         solver::types::SolveStatus::SAT => {
