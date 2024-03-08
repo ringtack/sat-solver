@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::{cmp::Ordering, mem, ops::BitAnd, time::Instant};
 
 use fxhash::{FxHashMap, FxHashSet};
@@ -196,10 +197,11 @@ impl CDCLSolver {
             if self.until_next_log == 0 {
                 info!("[Elapsed: {:#?}] Current stats:", self.start.elapsed());
                 info!(
-                    "- Conflicts: {}, Propagations: {}, Decisions: {}, Assignments: {} ({} total)",
+                    "- Conflicts: {}, Propagations: {}, Decisions: {}, Rand Decisions: {}, Assignments: {} ({} total)",
                     self.stats.conflicts,
                     self.stats.propagations,
                     self.stats.decisions,
+                    self.stats.rand_decisions,
                     self.n_assignments(),
                     self.n_vars(),
                 );
@@ -374,8 +376,6 @@ impl CDCLSolver {
             self.until_next_log = 0
         }
 
-        // TODO: update when to simplify i.e. clause delete here?
-
         conflict
     }
 
@@ -518,6 +518,11 @@ impl CDCLSolver {
     fn decide(&mut self) -> Option<Lit> {
         let mut next = V_UNDEF;
         // TODO: implement random decisions
+        if self.dh_conf.rand_var && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
+            self.stats.rand_decisions += 1;
+            next = rand::thread_rng().gen_range(0..(self.n_vars() as i64));
+            debug!("rand decision");
+        }
 
         // Iterate until either heap empty, or non-assigned next var found
         while next == V_UNDEF || self.assigned[next as usize] != LBool::Undef {
@@ -532,9 +537,13 @@ impl CDCLSolver {
         if next == V_UNDEF {
             None
         } else {
-            // TODO: implement random polarity
-            // Get polarity from previous decisions
-            let polarity = self.polarity[next as usize];
+            let mut polarity = false;
+            if self.dh_conf.rand_pol {
+                polarity = rand::thread_rng().gen_bool(0.5);
+            } else {
+                // Get polarity from previous decisions
+                polarity = self.polarity[next as usize];
+            }
             Some(Lit::new(next, polarity))
         }
     }

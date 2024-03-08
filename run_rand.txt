@@ -1,0 +1,4 @@
+[C1065_064.cnf] Status: UNSAT	Elapsed: 4.839398459s
+[C1065_082.cnf] Status: UNSAT	Elapsed: 6.423698792s
+[C140.cnf] Status: SAT	Elapsed: 310µs
+{"Instance": "C1597_024.cnf", "Time": "--", "Result": "--"}

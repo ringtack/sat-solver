@@ -33,6 +33,8 @@ fi
 # Create the log file
 touch $logFile
 
+cargo build --release
+
 # Run on every file, get the last line, append to log file
 for f in $inputFolder*.*
 do
@@ -44,8 +46,8 @@ do
 		cat output.tmp | tail -1 >> $logFile				# Record the last line as solution
 	else 										# Run failed, record the instanceName with no solution
 		echo Error
-		instance=$(basename "$fullFileName")	
-		echo "{\"Instance\": \"$instance\", \"Time\": \"--\", \"Result\": \"--\"}" >> $logFile	
+		instance=$(basename "$fullFileName")
+		echo "{\"Instance\": \"$instance\", \"Time\": \"--\", \"Result\": \"--\"}" >> $logFile
 	fi
 	rm -f output.tmp
 done

@@ -89,6 +89,12 @@ impl SolverConfig {
 
     pub fn decision_config(&self) -> DecisionConfig {
         let mut hc = DecisionConfig::default();
+        hc.rand_pol = self.decision_policy.random_pol;
+        hc.rand_var = self.decision_policy.random_var.is_some();
+        if hc.rand_var {
+            hc.rand_f = self.decision_policy.random_var.unwrap();
+        }
+
         match self.decision_policy.heuristic {
             HeuristicOption::VSIDS(_, _) => unimplemented!(),
             HeuristicOption::EVSIDS(inc_var, f, exp) => {
@@ -123,8 +129,8 @@ impl Default for SolverConfig {
             },
             decision_policy: DecisionPolicy {
                 heuristic: EVSIDS_DEFAULT,
-                random_var: None,
-                random_pol: false,
+                random_var: Some(0.005),
+                random_pol: true,
             },
         }
     }
@@ -213,6 +219,11 @@ pub struct OptConfig {
 // Decision heuristics config.
 #[derive(Default, Clone, Copy, Debug)]
 pub struct DecisionConfig {
+    /// Random selection flags.
+    pub rand_pol: bool,
+    pub rand_var: bool,
+    pub rand_f: f64,
+
     // TODO: do VSIDS stuff time permitting
     /// EVSIDS policy values.
     ///
