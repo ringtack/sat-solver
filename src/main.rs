@@ -14,6 +14,22 @@ pub struct Args {
     /// File path of instance to parse
     #[arg(short, long)]
     pub path: String,
+
+    /// Whether to restart
+    #[arg(short, long)]
+    pub restart: bool,
+
+    /// Whether to prefer true in decisions
+    #[arg(short, long)]
+    pub prefer_true: bool,
+
+    /// Whether to randomly decide vars (i.e. w/ what freq)
+    #[arg(short, long, default_value_t = 0.0)]
+    pub rand_var: f64,
+
+    /// Whether to randomize polarity or remember it
+    #[arg(short, long)]
+    pub rand_pol: bool,
 }
 
 fn main() {
@@ -31,10 +47,14 @@ fn main() {
     // Initialize solver
     let mut cfg = SolverConfig::default();
     // Whether to enable random stuff / restarts / prefer true in selections
-    cfg.restart = true;
-    // cfg.decision_policy.prefer_true = false;
-    // cfg.decision_policy.random_var = None;
-    // cfg.decision_policy.random_pol = false;
+    cfg.restart = args.restart;
+    cfg.decision_policy.prefer_true = args.prefer_true;
+    cfg.decision_policy.random_var = if args.rand_var > 0. {
+        Some(args.rand_var)
+    } else {
+        None
+    };
+    cfg.decision_policy.random_pol = args.rand_pol;
 
     info!("Starting solve attempt...");
     let mut solver = CDCLSolver::new(cfg, instance);
