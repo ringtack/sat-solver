@@ -96,6 +96,8 @@ impl SolverConfig {
 
     pub fn decision_config(&self) -> DecisionConfig {
         let mut hc = DecisionConfig::default();
+        hc.prefer_true = self.decision_policy.prefer_true;
+
         hc.rand_pol = self.decision_policy.random_pol;
         hc.rand_var = self.decision_policy.random_var.is_some();
         if hc.rand_var {
@@ -140,6 +142,7 @@ impl Default for SolverConfig {
                 heuristic: EVSIDS_DEFAULT,
                 random_var: Some(0.005),
                 random_pol: true,
+                prefer_true: false,
             },
         }
     }
@@ -199,6 +202,8 @@ pub struct DecisionPolicy {
     // default false for both
     pub random_var: Option<f64>,
     pub random_pol: bool,
+    // Whether to prefer true/false
+    pub prefer_true: bool,
 }
 
 // Heuristic configs
@@ -229,6 +234,9 @@ pub struct OptConfig {
 // Decision heuristics config.
 #[derive(Default, Clone, Copy, Debug)]
 pub struct DecisionConfig {
+    /// Whether to prefer true or false
+    pub prefer_true: bool,
+
     /// Random selection flags.
     pub rand_pol: bool,
     pub rand_var: bool,

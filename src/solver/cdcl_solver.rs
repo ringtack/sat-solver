@@ -139,7 +139,7 @@ impl CDCLSolver {
             cd_conf: c.clause_deletion_config(),
             rs_conf: c.restart_config(),
             assigned: vec![LBool::Undef; n_vars],
-            polarity: vec![false; n_vars],
+            polarity: vec![c.decision_config().prefer_true; n_vars],
             reasons: vec_with_size(n_vars, Reason::default()),
             acts,
             act_heap,
