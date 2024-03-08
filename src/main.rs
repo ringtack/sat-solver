@@ -67,10 +67,16 @@ fn main() {
     let (s, r) = channel::unbounded();
     for i in 0..args.mt {
         info!("Starting solve attempt in solver {}...", i);
+
         let s = s.clone();
-        let cfg = cfg.clone();
+        let mut cfg = cfg.clone();
         let instance = instance.clone();
         thread::spawn(move || {
+            // Only restart in half of the solvers
+            if cfg.restart {
+                cfg.restart = i % 2 == 0;
+            }
+
             let mut solver = CDCLSolver::new(cfg, instance);
             let start = Instant::now();
             let res = solver.solve();
