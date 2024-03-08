@@ -9,8 +9,9 @@ then
 	echo "Usage: `basename $0` <input>"
 	exit $E_BADARGS
 fi
-	
+
 input=$1
 
 # Update this file with instructions on how to run your code given an input
-java -cp src/ solver.sat.Main $input
+# cargo build --release
+./target/release/project1 -p "$input"

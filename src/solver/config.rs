@@ -50,6 +50,7 @@ impl SolverConfig {
 
     pub fn clause_deletion_config(&self) -> ClauseDeletionConfig {
         let mut cdc = ClauseDeletionConfig::default();
+        cdc.keep_f = self.deletion_policy.keep_f;
         // Search self for deletion policies
         for opt in &self.deletion_policy.sort_order {
             match *opt {
@@ -227,6 +228,8 @@ pub struct DecisionConfig {
 // Clause deletion config.
 #[derive(Default, Clone, Copy, Debug)]
 pub struct ClauseDeletionConfig {
+    /// Proportion (0.0, 1.0) to retain
+    pub keep_f: f64,
     /// Glucose (LBD) based clause deletion policy values
     ///
     /// Baseline number of conflicts required before clause deletion.

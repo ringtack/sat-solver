@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Display, mem};
 
 use super::{
     clause::ClauseKey,
@@ -8,7 +8,7 @@ use super::{
 
 pub struct WatchList {
     // Literal -> List of Watchers (i.e. clauses in which this Lit is watched)
-    occs: Vec<Vec<Watcher>>,
+    pub occs: Vec<Vec<Watcher>>,
 }
 
 impl WatchList {
@@ -45,7 +45,7 @@ impl WatchList {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default, Hash)]
 pub struct Watcher {
     pub ck: ClauseKey,
     pub blocker: Lit,
@@ -57,29 +57,8 @@ impl Watcher {
     }
 }
 
-/*
-impl WatchList {
-    // Creates a watch list for n variables.
-    pub fn new(n_lits: usize) -> Self {
-        Self {
-            occs: vec_with_size(n_lits, RefCell::new(vec![])),
-        }
-    }
-
-    // Adds a watcher to the literal's watched clauses list.
-    pub fn add_watcher(&mut self, l: Lit, w: Watcher) {
-        self.occs[l.v as usize].borrow_mut().push(w);
-    }
-
-    // Removes a watcher to the literal's watched clauses list, if it exists.
-    pub fn remove_watcher(&mut self, l: Lit, w: Watcher) {
-        let mut x = self.occs[l.v as usize].borrow_mut();
-        remove(&mut *x, w);
-    }
-
-    // Get a mutable reference to the literal's watch list.
-    pub fn get_watchers(&mut self, l: Lit) -> RefMut<'_, Vec<Watcher>> {
-        self.occs[l.v as usize].borrow_mut()
+impl Display for Watcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Clause: {:?}, blocker: {}", self.ck, self.blocker)
     }
 }
- */

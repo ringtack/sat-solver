@@ -1,0 +1,17 @@
+[C1065_064.cnf] Status: UNSAT	Elapsed: 23.844294416s
+[C1065_082.cnf] Status: UNSAT	Elapsed: 31.968647708s
+[C140.cnf] Status: SAT	Elapsed: 268.375µs
+{"Instance": "C1597_024.cnf", "Time": "--", "Result": "--"}
+{"Instance": "C1597_060.cnf", "Time": "--", "Result": "--"}
+{"Instance": "C1597_081.cnf", "Time": "--", "Result": "--"}
+[C168_128.cnf] Status: UNSAT	Elapsed: 1.084625ms
+[C181_3151.cnf] Status: SAT	Elapsed: 279.805042ms
+[C208_120.cnf] Status: UNSAT	Elapsed: 111.708µs
+[C208_3254.cnf] Status: UNSAT	Elapsed: 167.333µs
+[C210_30.cnf] Status: UNSAT	Elapsed: 579.5µs
+[C210_55.cnf] Status: UNSAT	Elapsed: 488.042µs
+[C459_4675.cnf] Status: SAT	Elapsed: 609.958µs
+[U50_1065_038.cnf] Status: UNSAT	Elapsed: 29.854733666s
+[U50_1065_045.cnf] Status: UNSAT	Elapsed: 22.550166583s
+{"Instance": "U50_4450_035.cnf", "Time": "--", "Result": "--"}
+{"Instance": "U75_1597_024.cnf", "Time": "--", "Result": "--"}

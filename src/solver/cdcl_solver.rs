@@ -1,16 +1,17 @@
-use std::{borrow::BorrowMut, cell::RefCell, env::vars, mem};
+use std::{cmp::Ordering, mem, ops::BitAnd, time::Instant};
 
-use fxhash::FxHashMap;
-use log::debug;
+use fxhash::{FxHashMap, FxHashSet};
+use log::{debug, info};
 use mut_binary_heap::BinaryHeap;
+use ordered_float::OrderedFloat;
 use slotmap::basic::{Iter, IterMut};
 
 use crate::{
-    dimacs::{
-        self,
-        sat_instance::{Literal, SATInstance},
+    dimacs::{self, sat_instance::SATInstance},
+    solver::{
+        types::lits_from_vars,
+        util::{has_dup, vec_to_str, vec_with_size},
     },
-    solver::{types::lits_from_vars, util::vec_with_size},
 };
 
 use super::{
@@ -18,7 +19,7 @@ use super::{
     clause::{Clause, ClauseAllocator, ClauseKey, Reason},
     config::{ClauseDeletionConfig, DecisionConfig, OptConfig, RestartConfig, SolverConfig},
     stats::RuntimeStats,
-    types::{DecisionLevel, LBool, Lit, SolveStatus, Var, F64, L_UNDEF, V_UNDEF},
+    types::{DecisionLevel, LBool, Lit, SolveStatus, Var, F64, LBD, L_UNDEF, V_UNDEF},
     watch_list::{WatchList, Watcher},
 };
 
@@ -48,7 +49,7 @@ pub struct CDCLSolver {
     conf: OptConfig,
     dh_conf: DecisionConfig,
     cd_conf: ClauseDeletionConfig,
-    rs_conf: RestartConfig,
+    _rs_conf: RestartConfig,
 
     /// Variable/Literal metadata.
     ///
@@ -64,7 +65,7 @@ pub struct CDCLSolver {
     /// Var -> polarity (if exists)
     /// If phase save, store previously assigned polarities to use when deciding branch lits.
     polarity: Vec<bool>,
-    /// Lit -> reason information
+    /// VAR -> reason information
     /// Useful for conflict analysis (i.e. needed when iterating backwards to detect UIP)
     reasons: Vec<Reason>,
     /// Var -> activity
@@ -95,6 +96,11 @@ pub struct CDCLSolver {
 
     /// Stats.
     stats: RuntimeStats,
+    /// Elapsed time.
+    start: Instant,
+
+    // TODO: hacky, change later
+    until_next_log: i64,
 }
 
 impl CDCLSolver {
@@ -113,10 +119,10 @@ impl CDCLSolver {
         let n_vars = var as usize;
         let n_lits = lits_from_vars(n_vars);
         // Construct activity heap
-        let acts = vec![F64::new(0.).unwrap(); n_vars];
+        let acts = vec![OrderedFloat(0.); n_vars];
         let mut act_heap = BinaryHeap::with_capacity(n_vars);
         for v in 0..n_vars {
-            act_heap.push(v as Var, F64::new(0.).unwrap());
+            act_heap.push(v as Var, OrderedFloat(0.));
         }
 
         let mut solver = Self {
@@ -130,10 +136,10 @@ impl CDCLSolver {
             conf: c.opt_config(),
             dh_conf: c.decision_config(),
             cd_conf: c.clause_deletion_config(),
-            rs_conf: c.restart_config(),
+            _rs_conf: c.restart_config(),
             assigned: vec![LBool::Undef; n_vars],
             polarity: vec![false; n_vars],
-            reasons: vec_with_size(n_lits, Reason::default()),
+            reasons: vec_with_size(n_vars, Reason::default()),
             acts,
             act_heap,
             seen: vec![false; n_vars],
@@ -142,6 +148,9 @@ impl CDCLSolver {
             reason_lits: vec![],
             learnt_lits: vec![],
             stats: RuntimeStats::default(),
+            start: Instant::now(),
+
+            until_next_log: 0,
         };
         // Init solver with instance clauses
         solver.init(instance);
@@ -177,34 +186,55 @@ impl CDCLSolver {
 
     pub fn solve(&mut self) -> SolveStatus {
         // Record stats
-        let n_conflicts = 0;
+        let _n_conflicts = 0;
         self.stats.starts += 1;
 
         // TODO: integrate restarts into this
         loop {
             let conflict = self.propagate();
+
+            if self.until_next_log == 0 {
+                info!("[Elapsed: {:#?}] Current stats:", self.start.elapsed());
+                info!(
+                    "- Conflicts: {}, Propagations: {}, Decisions: {}, Assignments: {} ({} total)",
+                    self.stats.conflicts,
+                    self.stats.propagations,
+                    self.stats.decisions,
+                    self.n_assignments(),
+                    self.n_vars(),
+                );
+                info!(
+                    "- Constraints: {}, Learned clauses: {}, Learned literals: {}",
+                    self.stats.n_clauses, self.stats.n_learnts, self.stats.n_learnt_lits,
+                );
+                info!(
+                    "- Average watchers per literal: {:.5}, average literals per learnt clause: {}",
+                    self.avg_watchers(),
+                    self.stats
+                        .n_learnt_lits
+                        .checked_div_euclid(self.stats.n_learnts)
+                        .unwrap_or_default()
+                );
+
+                self.until_next_log = 100_000;
+            }
             // If no conflict, ultimately check if all variables are assigned, or esle
             // pick a condition to branch on.
             if let None = conflict {
-                // TODO: check if # conflicts has reached some point
-
                 // If at base level (i.e. no decisions yet), try simplifying w/ learned
-                // clauses
-                if self.decision_level == 0 {
-                    // If we can't simplify further, formula is UNSAT
-                    if !self.simplify() {
-                        return SolveStatus::UNSAT;
-                    }
+                // clauses; if we can't smplify further, formula is UNSAT
+                if self.decision_level == 0 && !self.simplify() {
+                    return SolveStatus::UNSAT;
                 }
 
                 // Decide new variable
                 self.stats.decisions += 1;
                 let next = self.decide();
-                debug!("Deciding lit: {:?}", next);
                 match next {
                     // If no next one found, we've found a satisfying assignment, so return
                     None => return SolveStatus::SAT,
                     Some(lit) => {
+                        debug!("Deciding lit: {lit}");
                         self.make_decision(lit);
                     }
                 }
@@ -218,6 +248,15 @@ impl CDCLSolver {
                     return SolveStatus::UNSAT;
                 }
 
+                debug!("Trail: {:?}", vec_to_str(&self.trail.trail));
+
+                debug!(
+                    "(DL {}, lit {}) analyzing conflict with cause {:?}",
+                    self.decision_level,
+                    self.trail
+                        .get(self.trail.dl_delim_idx(self.decision_level - 1)),
+                    self.ca[conflict_ck],
+                );
                 // Analyze cause of conflict
                 let (learnt_lits, bt_lvl) = self.analyze_conflicts(conflict_ck);
                 // Backtrack to pre-conflict level
@@ -226,22 +265,44 @@ impl CDCLSolver {
                 // If just one clause, just add to trail as new implication (since it'll be implied
                 // by BCP anyways)
                 if learnt_lits.len() == 1 {
+                    debug!(
+                        "unit learned clause (lit {}), adding to trail",
+                        learnt_lits[0],
+                    );
+
                     self.add_to_trail(learnt_lits[0], None);
                 } else {
+                    debug!("Creating clause from {}", vec_to_str(&learnt_lits));
+
                     // Otherwise, create clause
                     let learnt_ck = self.create_clause(&learnt_lits, true);
+                    let lbd = self.clause_lbd(&learnt_lits);
                     // Automatically drop learnt_c after bumping activity, since we won't need it
                     if {
                         let learnt_c = &mut self.ca[learnt_ck];
+                        // Set LBD of learnt clause
+                        learnt_c.lbd = lbd;
+
                         learnt_c.bump_activity(self.cd_conf.inc_var, self.cd_conf.rescale_lim)
                     } {
                         self.rescale_clause_activity();
                     }
-                    // Bump clause activity, and add assigning literal to trail
-                    self.add_to_trail(learnt_lits[0], Some(learnt_ck));
                     // Create watchers for literal
                     self.learnts.push(learnt_ck);
                     self.attach_clause(learnt_ck);
+
+                    debug!("Adding debug_asserting literal {} to trail", learnt_lits[0]);
+
+                    // Bump clause activity, and add assigning literal to trail
+                    self.add_to_trail(learnt_lits[0], Some(learnt_ck));
+                }
+
+                // If too many conflicts, delete some clauses based on sorting criteria:
+                // first LBD, then activity, then size.
+                // TODO: expand to others besides glucose
+                if self.should_delete_clauses() {
+                    debug!("Deleting clauses");
+                    self.delete_clauses();
                 }
 
                 // Decay activities
@@ -251,6 +312,29 @@ impl CDCLSolver {
         }
     }
 
+    /// Statistics computations.
+    ///
+    /// Counts the number of assignments so far.
+    pub fn n_assignments(&self) -> usize {
+        self.assigned
+            .iter()
+            .map(|a| (*a != LBool::Undef) as usize)
+            .reduce(|acc, b| acc + b)
+            .unwrap()
+    }
+
+    /// Computes the average number of watchers per literal.
+    pub fn avg_watchers(&self) -> f64 {
+        let total = self
+            .watches
+            .occs
+            .iter()
+            .map(|v| v.len())
+            .reduce(|acc, sz| acc + sz)
+            .unwrap();
+        total as f64 / self.watches.occs.len() as f64
+    }
+
     // Emit assignments back in original DIMACS form.
     pub fn assignments(&self) -> Vec<Lit> {
         let mut og_assignments = Vec::with_capacity(self.n_vars());
@@ -258,7 +342,7 @@ impl CDCLSolver {
         for (v, ass) in self.assigned.iter().enumerate() {
             og_assignments.push(Lit::new(
                 *self.var_mapping.get(&(v as i64)).unwrap(),
-                bool::from(*ass),
+                !bool::from(*ass),
             ));
         }
         og_assignments
@@ -274,9 +358,9 @@ impl CDCLSolver {
         while let Some(l) = self.get_next_bcp_lit() {
             n_props += 1;
 
-            debug!("Propagating {}", l.to_string());
             // Process all watchers for this literal
             conflict = self.propagate_process_watchers_for_lit(l);
+
             // If conflict occurred, set bcp idx to end of trail; this has the same effect of
             // breaking out of the loop (whose condition is bcp_idx < trail.len())
             if conflict.is_some() {
@@ -285,6 +369,11 @@ impl CDCLSolver {
         }
         // Update stats
         self.stats.propagations += n_props;
+        self.until_next_log -= n_props as i64;
+        if self.until_next_log < 0 {
+            self.until_next_log = 0
+        }
+
         // TODO: update when to simplify i.e. clause delete here?
 
         conflict
@@ -296,47 +385,80 @@ impl CDCLSolver {
         // Store counters to record current progress
         let (mut i, mut j) = (0, 0);
         let n_ws = watchers.len();
+
+        debug!("Propagating {l} with {n_ws} watchers");
+
         'next_watcher: while i < n_ws {
+            // better not have conflict if we runnin it back
+            debug_assert!(conflict.is_none());
+
             let w_i = &mut watchers[i];
-            debug!("Watching clause: {:?}", &self.ca[w_i.ck]);
+            debug!(
+                "Watching clause: {:?} (blocker {})",
+                &self.ca[w_i.ck], w_i.blocker
+            );
+            // If the clause is deleted, I oopsied and forgot to remove somewhere... so remove watcher
+            // here
+            if self.ca[w_i.ck].garbage {
+                i += 1;
+                continue;
+            }
+
             // See if we can skip this clause; if blocker already assigned, we don't care
             if self.value(w_i.blocker) == LBool::True {
+                debug!("Blocker {} true, skipping", w_i.blocker,);
+                watchers[j] = watchers[i];
                 i += 1;
                 j += 1;
                 continue;
             }
 
-            // For invariant, make sure false lit is second value in clause; we // want the first lit always to be unassigned (and the false lit is // assigned by definition from it being on the trail)
-            let fl = !l;
+            // For invariant, make sure false lit is second value in clause; we want the first lit
+            // always to be unassigned (and the false lit is assigned by definition from it being
+            // on the trail)
+            let neg_l = !l;
             let ck = w_i.ck;
             let (first, c_sz) = {
                 let c = &mut self.ca[ck];
-                if c[0] == fl {
-                    c[0] = c[1];
-                    c[1] = fl;
+
+                // debug_assert!(c[0] != c[1]);
+                if c[0] == neg_l {
+                    debug!("Swapped {} with {}", c[0], c[1]);
+                    c.lits.swap(0, 1);
+                    // c[0] = c[1];
+                    // c[1] = neg_l;
                 }
+
+                debug_assert!(c[1] == neg_l);
                 i += 1;
                 (c[0], c.size)
             };
 
-            // If first watch is true, then this clause is sat already
+            // If first watch is not blocker and is already true, then this clause is sat
             let w_first = Watcher::new(ck, first);
-            if first != w_first.blocker && self.value(first) == LBool::True {
+            if first != w_i.blocker && self.value(first) == LBool::True {
+                debug!("First watcher {first} true, skipping");
                 watchers[j] = w_first;
                 j += 1;
                 continue;
             }
 
-            // Find new watcher, since false has been assigned
+            // Find new watcher, since either false/not yet assigned
             for k in 2..c_sz {
                 // If not false, update that watcher's list too, and continue
-                let c_k = self.ca[ck][k];
-                if self.value(c_k) != LBool::False {
+                let v = self.value(self.ca[ck][k]);
+                if v != LBool::False {
                     let c = &mut self.ca[ck];
                     c[1] = c[k];
-                    c[k] = fl;
+                    c[k] = neg_l;
                     self.watches.get_watchers(!c[1]).push(w_first);
-                    break 'next_watcher;
+
+                    debug!(
+                        "Added watcher (blocker {}) to lit {} (val: {})",
+                        w_first.blocker, !c[1], v
+                    );
+
+                    continue 'next_watcher;
                 }
             }
 
@@ -345,6 +467,8 @@ impl CDCLSolver {
             // If we didn't find a new watcher, it's a unit clause: check if either
             // conflict, or a new implication
             if self.value(first) == LBool::False {
+                debug!("Got conflict for {first}");
+
                 conflict = Some(ck);
                 // Copy remaining watches over, in case we've skipped some watches when we find new
                 // watchers; this also has the effect of breaking out of the loop, since i == n_ws
@@ -354,10 +478,13 @@ impl CDCLSolver {
                     j += 1;
                 }
             } else {
+                debug!("Adding {first} to trail with cause {:?}", self.ca[ck]);
                 // If no conflict, we got a new implication, so add to trail and assign it
                 self.add_to_trail(first, Some(ck));
             }
         }
+
+        debug!("Done propagating {l}");
 
         // Truncate watcher's list to remove any we've skipped to find new watchers
         watchers.truncate(j);
@@ -370,6 +497,8 @@ impl CDCLSolver {
     // Simplifies the clause database by removing satisfied clauses.
     // Returns whether the format is either unknown (true), or UNSAT (false).
     fn simplify(&mut self) -> bool {
+        debug!("Attempting simplify");
+
         // if propagating -> conflict, then conflicting units -> UNSAT
         if let Some(_) = self.propagate() {
             return false;
@@ -413,78 +542,114 @@ impl CDCLSolver {
     // Analyze conflicts if one occurs. Returns the literals of the new clause, and the decision
     // level to which to backtrack.
     fn analyze_conflicts(&mut self, ck: ClauseKey) -> (Vec<Lit>, DecisionLevel) {
-        // Record the current asserting literal.
+        // Record the current debug_asserting literal.
         let mut a_lit = None;
         let mut vars_to_bump = Vec::with_capacity(16);
         self.learnt_lits.clear();
+        self.learnt_lits.resize(1, Lit::default());
         self.seen_to_clear.clear();
 
-        let mut learnt = {
-            let c = &self.ca[ck];
-            self.reason_lits.resize(c.lits.len(), Lit::default());
-            self.reason_lits.copy_from_slice(&c.lits);
-            c.learnt
-        };
-        // Loop until we've reverse-BFS'ed to the first UIP.
+        for s in &self.seen {
+            debug_assert!(*s == false);
+        }
+
+        // Iterate backwards through trail_idx until we've reverse-BFS'ed to the first UIP.
+        let mut trail_idx = self.trail_size() - 1;
         let mut trail_ctr = 0;
+        let mut curr_ck = Some(ck);
         let mut rescale_clauses = false;
         loop {
+            // curr ck better be some reason, otherwise we fucked up somewhere
+            debug_assert!(curr_ck.is_some());
+
+            // Compute reason
+            let learnt = {
+                let c = &self.ca[curr_ck.unwrap()];
+
+                debug!("Reason (ctr: {trail_ctr}): {:?}", c);
+                debug_assert!(!has_dup(&c.lits));
+
+                self.reason_lits.resize(c.lits.len(), Lit::default());
+                self.reason_lits.copy_from_slice(&c.lits);
+                c.learnt
+            };
             // If learnt, bump activity to prioritize in clause deletion
             if learnt {
+                // Record whether we need to re-scale clauses
                 rescale_clauses = {
                     // Limit scope here to prevent borrow checker from angies
-                    let c = &mut self.ca[ck];
+                    let c = &mut self.ca[curr_ck.unwrap()];
                     c.bump_activity(self.cd_conf.inc_var, self.cd_conf.rescale_lim)
                 };
             }
 
-            // For every clause literal except the first, if not yet seen, bump its activity
-            // and either increase counter if at/above current DL (since this is another node
-            // we need to reverse-BFS), or add to learned literals.
-            // TODO: why not the first, except when None?
+            // Check every clause literal except the first (unless a_lit is None, i.e. first cause)
+            // We maintain invariant that the first literal in the clause is the debug_asserting literal,
+            // so we can skip. If we don't, since we've already marked not seen, this causes an
+            // infinite loop.
             let s_idx = if a_lit.is_none() { 0 } else { 1 };
             for lit in self.reason_lits[s_idx..].into_iter() {
                 let var = lit.var();
-                // Skip base-DL lits
                 let lvl = self.level(var);
-                if lvl > 0 {
-                    if !self.seen[lit.var_idx()] {
-                        vars_to_bump.push(var);
-                        self.seen[lit.var_idx()] = true;
-                        if lvl >= self.decision_level {
-                            trail_ctr += 1;
-                        } else {
-                            self.learnt_lits.push(*lit);
-                        }
+
+                debug!(
+                    "Should visit var {var} (lvl {lvl}, pos {:?})? ({}, {}). Learn? {}",
+                    self.trail.trail.iter().position(|l| l.var() == lit.var()),
+                    lvl > 0,
+                    !self.seen[lit.var_idx()],
+                    lvl < self.decision_level
+                );
+
+                // Skip 0-DL lits, since those would've already caused UNSATs
+                // && self.assigned[lit.var_idx()] != LBool::Undef
+                if lvl > 0 && !self.seen[lit.var_idx()] {
+                    // If not yet seen, bump activity
+                    self.seen[lit.var_idx()] = true;
+                    vars_to_bump.push(var);
+                    // If at/above DL, increase trail counter to clear
+                    if lvl >= self.decision_level {
+                        trail_ctr += 1;
+                    } else {
+                        // Otherwise, add to learned literals
+                        self.learnt_lits.push(*lit);
                     }
                 }
             }
 
+            // trail_idx = self.trail_size() - 1;
             // After processing each literal within the reason clause, find next clause to parse
-            loop {
-                let l = self.pop_trail();
-                // If not seen yet, need to handle:
-                if !self.seen[l.var_idx()] {
-                    // Update asserting lit
-                    a_lit = Some(l);
-                    // Get new reason
-                    let ck = self.reason_ref_mut(l.var()).ck.unwrap();
-                    learnt = {
-                        let c = &self.ca[ck];
-                        self.reason_lits.resize(c.lits.len(), Lit::default());
-                        self.reason_lits.copy_from_slice(&c.lits);
-                        c.learnt
-                    };
-                    // TODO: do I need this?
-                    self.seen[l.var_idx()] = false;
-                    trail_ctr -= 1;
-                    // Process a_lit
-                    break;
-                }
+            let tmp = self.trail.get(trail_idx).var_idx();
+            debug!(
+                "{tmp} seen? {} (trail: {}, trail_idx: {})",
+                self.seen[tmp],
+                vec_to_str(&self.trail.trail),
+                trail_idx
+            );
+            while !self.seen[self.trail.get(trail_idx).var_idx()] {
+                debug!("{} not seen, going back", self.trail.get(trail_idx).var());
+                trail_idx -= 1;
             }
+            let l = self.trail_at(trail_idx);
+            // Update debug_asserting lit
+            a_lit = Some(l);
+            // Get new reason
+            curr_ck = self.reason_ref(l.var()).ck;
+            // Clear seen-ness from this boi
+            self.seen[l.var_idx()] = false;
+            trail_ctr -= 1;
 
+            debug!("New debug_asserting lit {l} with ctr {trail_ctr}");
+
+            // If curr_ck is none, the trail counter must also be done, so we break (i.e. this is
+            // the UIP)
+            debug_assert!(
+                curr_ck.is_some() || trail_ctr == 0,
+                "curr_ck: {:?}, trail_ctr: {trail_ctr}",
+                curr_ck
+            );
             // Check if reached UIP
             if trail_ctr == 0 {
+                debug!("Found UIP (a_lit: {}), done backtracking", a_lit.unwrap());
                 break;
             }
         }
@@ -496,31 +661,37 @@ impl CDCLSolver {
             self.bump_var_activity(*var);
         }
 
-        // Set first learnt lit to negation of asserting lit (since we want to prevent this
+        // Set first learnt lit to negation of debug_asserting lit (since we want to prevent this
         // implication in the future).)
-        // TODO: why do we need the first to be asserting again? I think it's for watched lits and
-        // CCM, but not entirely sure
         self.learnt_lits[0] = !a_lit.unwrap();
 
         // Mark seen vars to be cleared
         for l in &self.learnt_lits {
             self.seen_to_clear.push(l.var());
         }
-        // TODO: implement ccm here later
+
+        let mut v = mem::take(&mut self.learnt_lits);
+        // Minimize clause
+        self.conflict_clause_minimization(&mut v);
+        let _ = mem::replace(&mut self.learnt_lits, v);
 
         // Find backtrack level: if unit learnt lit, backtrack back to base DL to propagate
         let bt_lvl = if self.learnt_lits.len() == 1 {
             0
         } else {
-            // Otherwise, find highest DL in learnt lits (that's not the asserting lit)
+            // Otherwise, find highest DL in learnt lits (that's not the debug_asserting lit)
             let (max_i, max_lvl) = self.learnt_lits[1..]
                 .into_iter()
                 .enumerate()
                 .max_by(|(_, l1), (_, l2)| self.level(l1.var()).cmp(&self.level(l2.var())))
-                .map(|(i, l)| (i, self.level(l.var())))
+                // +1 since max_i is enumerated from 1.., so it's one too low
+                .map(|(i, l)| (i + 1, self.level(l.var())))
                 .unwrap();
-            // Swap 2nd learned lit with the max level lit
+            debug!("max_i: {max_i}");
+            //  Swap 2nd learned lit with the max level lit;
             self.learnt_lits.swap(1, max_i);
+            debug_assert!(max_lvl == self.level(self.learnt_lits[1].var()));
+            debug_assert!(!has_dup(&self.learnt_lits));
             max_lvl
         };
 
@@ -533,8 +704,11 @@ impl CDCLSolver {
         (self.learnt_lits.clone(), bt_lvl)
     }
 
+    /// Minimizes a clause by filtering redundant literals.
     fn conflict_clause_minimization(&mut self, lits: &mut Vec<Lit>) {
-        todo!()
+        let abs_lvl = self.abstract_levels(&lits);
+        // Only include if decision variable, or not redundant:
+        lits.retain(|l| self.reason(l.var()).ck.is_none() || !self.is_redundant(*l, abs_lvl));
     }
 
     // Backtrack to the desired decision level, cleaning up the trail as necessary.
@@ -545,11 +719,26 @@ impl CDCLSolver {
 
         // Get level delimiter trail index for this level
         let lvl_dlm_idx = self.trail.dl_delim_idx(dl);
+
+        debug!(
+            "Backtracking to DL {dl} (idx: {}, current trail: {})",
+            lvl_dlm_idx,
+            vec_to_str(&self.trail.trail)
+        );
+
         while self.trail_size() > lvl_dlm_idx {
             let lit = self.pop_trail();
             let var = lit.var_idx();
+
+            debug!(
+                "Popped {lit} (lvl {}), unassigning back to LUndef",
+                self.level(lit.var())
+            );
+
             // Unassign this variable
             self.assigned[var] = LBool::Undef;
+            // Clear its reason; it'll probably have a different one next time
+            self.reasons[var] = Reason::default();
             // If we're phase saving, record the polarity
             if self.conf.save_phases {
                 self.polarity[var] = lit.sign();
@@ -561,7 +750,10 @@ impl CDCLSolver {
         // After clearing the trail, update bcp to trail head
         self.trail.set_bcp_idx_to_trail_head();
         // Shrink tail down to the level specified (so if lvl = 2, truncate down to lvl+1)
-        self.trail.dl_delim_idxs.truncate((dl + 1) as usize);
+        self.trail.dl_delim_idxs.truncate(dl as usize);
+        self.decision_level = dl;
+
+        debug!("Set DL back to {dl}");
     }
 
     /// Clause functions
@@ -595,12 +787,17 @@ impl CDCLSolver {
             // No reason here, since was decided on addition (i.e. dl == 0)
             1 => {
                 self.add_to_trail(lits[0], None);
+                if let Some(_) = self.propagate() {
+                    return SolveStatus::UNSAT;
+                }
             }
             _ => {
                 // Add to watchlist and slotmap
                 let ck = self.create_clause(&lits, false);
                 self.clauses.push(ck);
                 self.attach_clause(ck);
+
+                self.stats.n_clauses += 1;
             }
         };
 
@@ -613,7 +810,7 @@ impl CDCLSolver {
             let c = &self.ca[ck];
             (c[0], c[1], c.size, c.learnt)
         };
-        assert!(c_sz > 1);
+        debug_assert!(c_sz > 1);
         self.watches.add_watcher(!c0, Watcher::new(ck, c1));
         self.watches.add_watcher(!c1, Watcher::new(ck, c0));
         if learnt {
@@ -660,6 +857,8 @@ impl CDCLSolver {
 
     /// Remove a clause (i.e. its watchers) from the solver.
     fn remove_clause(&mut self, ck: ClauseKey, c0: Lit, c1: Lit) {
+        debug!("Removing clause {:?}", self.ca[ck]);
+
         // Remove watchers for c0 and c1
         let w0 = Watcher::new(ck, c1);
         let w1 = Watcher::new(ck, c0);
@@ -673,15 +872,123 @@ impl CDCLSolver {
         c.lits.iter().any(|l| self.value(*l) == LBool::True)
     }
 
+    /// Check if we should remove clauses.
+    fn should_delete_clauses(&self) -> bool {
+        // TODO: expand beyond glucose
+        self.stats.conflicts % (self.cd_conf.u + self.stats.deletions * self.cd_conf.k) == 0
+    }
+
+    /// Deletes clauses:
+    /// - Preserve all binary and just-added learnt clauses
+    /// - Sort by lowest LBD first
+    /// - Sort by highest activity
+    fn delete_clauses(&mut self) {
+        let mut learnts = self.learnts.clone();
+
+        debug!("Start clauses: {}", learnts.len());
+
+        // Sort first by LBD, then highest activity, then by size. First elements are the best.
+        learnts.sort_by(|c1, c2| {
+            let c1 = &self.ca[*c1];
+            let c2 = &self.ca[*c2];
+            if c1.lbd > c2.lbd {
+                Ordering::Greater
+            } else if c2.lbd > c1.lbd {
+                Ordering::Less
+            } else if c1.act < c2.act {
+                Ordering::Greater
+            } else if c2.act < c1.act {
+                Ordering::Less
+            } else if c1.lits.len() > c2.lits.len() {
+                Ordering::Greater
+            } else if c2.lits.len() > c1.lits.len() {
+                Ordering::Less
+            } else {
+                Ordering::Equal
+            }
+        });
+        debug!(
+            "Learnt vals: {}",
+            vec_to_str(
+                &learnts
+                    .iter()
+                    .map(|ck| self.ca[*ck].lbd)
+                    .collect::<Vec<_>>()
+            )
+        );
+
+        // Compute number to retain
+        let n_to_retain = (learnts.len() as f64 * self.cd_conf.keep_f) as usize;
+
+        let mut retained = 0;
+        // Clauses to remove
+        let mut ck_to_remove = Vec::with_capacity(n_to_retain);
+        learnts.iter().for_each(|ck| {
+            let c = &mut self.ca[*ck];
+            // If c is protected or binary, don't do anything (but mark as no longer protected)
+            if c.protected || c.lits.len() == 2 {
+                c.protected = false;
+                retained += 1;
+                return;
+            }
+            // Otherwise, if surpassed n_to_retain, mark for removal
+            if retained >= n_to_retain {
+                c.garbage = true;
+                // Add to be removed
+                ck_to_remove.push(ck);
+            } else {
+                // Otherwise, increment retained
+                retained += 1;
+            }
+        });
+
+        // Remove clauses
+        let mut deleted_clauses = 0;
+        let mut deleted_lits = 0;
+        self.learnts.retain(|ck| {
+            let c = &self.ca[*ck];
+            if c.garbage {
+                deleted_clauses += 1;
+                deleted_lits += c.lits.len() as u64;
+                false
+            } else {
+                debug!("lbd: {} (DL {})", c.lbd, self.decision_level);
+                true
+            }
+        });
+
+        debug!("End clauses after deletion: {}", self.learnts.len());
+
+        // Update stats
+        self.stats.deletions += 1;
+        self.stats.n_learnts -= deleted_clauses;
+        self.stats.n_learnt_lits -= deleted_lits;
+    }
+
     /// Auxiliary structure methods
     ///
     /// Add to the trail, updating the associated reason, dl, and assignment
     fn add_to_trail(&mut self, lit: Lit, ck: Option<ClauseKey>) {
-        assert!(self.value(lit) == LBool::Undef);
+        // Make sure not already assigned
+        debug_assert!(
+            self.value(lit) == LBool::Undef,
+            "lit {lit} assigned to {} already",
+            self.value(lit)
+        );
+
         // If +Lit (i.e. sign == false), assign true; otherwise, assign false
-        self.assigned[lit.var_idx()] = LBool::from(!lit.sign() as u8);
+        self.assigned[lit.var_idx()] = LBool::from_sign(!lit.sign());
+
+        debug!(
+            "Assigning {} to {} (cause: {:?}, lvl: {})",
+            lit.var(),
+            self.assigned[lit.var_idx()],
+            ck,
+            self.decision_level,
+        );
+
         // Add reason to antecedent graph, and push to trail
-        self.reasons[lit.idx()] = Reason {
+        self.reasons[lit.var_idx()] = Reason {
             ck,
             dl: self.decision_level,
         };
@@ -694,6 +1001,8 @@ impl CDCLSolver {
         self.decision_level += 1;
         self.trail.dl_delim_idxs.push(self.trail_size());
         self.add_to_trail(lit, None);
+
+        debug_assert!(self.decision_level as usize == self.trail.dl_delim_idxs.len());
     }
 
     /// Rebuild the heap from the activity list.
@@ -708,9 +1017,17 @@ impl CDCLSolver {
         }
     }
 
+    /// Remove all watchers for a lit that appear in a set .
+    fn remove_from_watchers(&mut self, l: Lit, set: &FxHashSet<Watcher>) {
+        let watchers = self.watches.get_watchers(l);
+        debug!("watchers before: {}", watchers.len());
+        watchers.retain(|w| !set.contains(w));
+        debug!("watchers after: {}", watchers.len());
+    }
+
     /// Literal/Variable accesses
     ///
-    /// Calculate value
+    /// Calculate value given a literal
     fn value(&self, l: Lit) -> LBool {
         self.assigned[l.var_idx()] ^ LBool::from(l.sign() as u8)
     }
@@ -736,24 +1053,87 @@ impl CDCLSolver {
     }
 
     /// Get mut ref to reason for this var
-    fn reason_ref_mut(&mut self, v: Var) -> &mut Reason {
+    fn _reason_ref_mut(&mut self, v: Var) -> &mut Reason {
         &mut self.reasons[v as usize]
     }
 
+    /// Computes the total number of variables.
     fn n_vars(&self) -> usize {
         self.var_mapping.len()
     }
 
-    /// Statistics computations for activity, LBD, etc.
-    ///
-    /// Bumps the activity of the clause. Returns if clause scaling is needed.
-    fn bump_clause_activity(&self, c: &mut Clause) -> bool {
-        c.act += self.cd_conf.inc_var;
-
-        // If exceeds limit, let caller know
-        c.act >= self.cd_conf.rescale_lim
+    /// Computes the abstract level for a single literal.
+    fn abstract_level(&self, v: Var) -> usize {
+        1 << (self.level(v).bitand(31))
     }
 
+    /// Computes the abstract level for a collection of literals, where abstract level
+    /// simply represents the denoted levels in bit form.
+    fn abstract_levels(&self, lits: &[Lit]) -> usize {
+        let mut abs_lvl = 0;
+        lits.iter()
+            .for_each(|l| abs_lvl |= self.abstract_level(l.var()));
+        abs_lvl
+    }
+
+    /// Computes the LBD of a collection of literals.
+    fn clause_lbd(&self, lits: &[Lit]) -> LBD {
+        let mut uniq = FxHashSet::default();
+        for l in lits {
+            uniq.insert(self.level(l.var()));
+        }
+
+        debug!("{} (DL {})", uniq.len() as LBD, self.decision_level);
+        debug!(
+            "{}",
+            vec_to_str(&lits.iter().map(|l| self.level(l.var())).collect::<Vec<_>>())
+        );
+
+        uniq.len() as LBD
+    }
+
+    /// Determines whether a literal is redundant.
+    fn is_redundant(&mut self, l: Lit, abs_lvls: usize) -> bool {
+        self.analyze_stack.clear();
+        self.analyze_stack.push(l);
+        let top = self.seen_to_clear.len();
+        while self.analyze_stack.len() > 0 {
+            let l = self.analyze_stack.pop().unwrap();
+            assert!(self.reason_clause(l.var()).is_some());
+
+            let ck = self.reason_clause(l.var()).unwrap();
+            let c = &self.ca[ck];
+            // For every literal in the clause, check if it's redundant
+            for c_lit in &c.lits[1..] {
+                let var = c_lit.var();
+                let lvl = self.level(var);
+                if !self.seen[c_lit.var_idx()] && lvl > 0 {
+                    // If it had some reason, and it's on one of the decision levels we're interested
+                    // in, then we don't need to process it (since we already have variables to
+                    // learn from)
+                    if self.reason_clause(var).is_some()
+                        && (self.abstract_level(var).bitand(abs_lvls) != 0)
+                    {
+                        self.seen[c_lit.var_idx()] = true;
+                        self.analyze_stack.push(*c_lit);
+                        self.seen_to_clear.push(var);
+                    } else {
+                        // Otherwise, it provides useful information, so keep
+                        for v in &self.seen_to_clear[top..] {
+                            self.seen[*v as usize] = false;
+                        }
+                        self.seen_to_clear.truncate(top);
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Statistics computations for activity, LBD, etc.
+    ///
     /// Rescales clause activity.
     fn rescale_clause_activity(&mut self) {
         let rescale_f = self.cd_conf.rescale_f;
@@ -768,7 +1148,7 @@ impl CDCLSolver {
         let var = v as usize;
         self.acts[var] *= self.dh_conf.inc_var;
         // If exceeds limit, rescale all activities and rebuild heap.
-        let lim = F64::new(self.dh_conf.rescale_lim).unwrap();
+        let lim = OrderedFloat(self.dh_conf.rescale_lim);
         if self.acts[var] >= lim {
             for a in &mut self.acts {
                 *a *= self.dh_conf.rescale_f;
@@ -777,8 +1157,10 @@ impl CDCLSolver {
             self.rebuild_heap();
         }
 
-        // Update heap
-        *self.act_heap.get_mut(&v).unwrap() = self.acts[var];
+        // If in heap, update (it might not be in heap if we're updating during backtrack)
+        if let Some(mut act) = self.act_heap.get_mut(&v) {
+            *act = self.acts[var];
+        }
     }
 
     /// Decays the clause activity scale factor (i.e. makes others less active comparatively).
@@ -798,7 +1180,7 @@ impl CDCLSolver {
         self.ca.create_clause(lits, learnt)
     }
 
-    fn clause_iter(&mut self) -> Iter<'_, ClauseKey, Clause> {
+    fn _clause_iter(&mut self) -> Iter<'_, ClauseKey, Clause> {
         self.ca.iter()
     }
 
@@ -807,7 +1189,7 @@ impl CDCLSolver {
     }
 
     /// All propagated iff bcp_idx >= trail.size()
-    fn all_propagated(&self) -> bool {
+    fn _all_propagated(&self) -> bool {
         self.trail.bcp_idx_at_end()
     }
 
@@ -828,6 +1210,6 @@ impl CDCLSolver {
 
     // Indexes into the trail.
     fn trail_at(&self, idx: usize) -> Lit {
-        self.trail.trail[idx]
+        self.trail.get(idx)
     }
 }

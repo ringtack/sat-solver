@@ -1,5 +1,8 @@
+use std::{path::Path, time::Instant};
+
 use clap::Parser;
 use dimacs::parser::DimacsParser;
+use log::info;
 use solver::{cdcl_solver::CDCLSolver, config::SolverConfig};
 
 mod dimacs;
@@ -17,15 +20,21 @@ fn main() {
     let args = Args::parse();
 
     log::set_max_level(log::LevelFilter::Trace);
+    env_logger::builder()
+        .filter(None, log::LevelFilter::Info)
+        .init();
 
     // Get instance
-    let dimacs_parser = DimacsParser::new(args.path).unwrap();
+    let dimacs_parser = DimacsParser::new(&args.path).unwrap();
     let instance = dimacs_parser.parse().unwrap();
 
     // Initialize solver
     let cfg = SolverConfig::default();
+    info!("Starting solve attempt...");
     let mut solver = CDCLSolver::new(cfg, instance);
+    let start = Instant::now();
     let res = solver.solve();
+    let elapsed = start.elapsed();
     match res {
         solver::types::SolveStatus::Unknown => panic!("Solver should never return Unknown"),
         solver::types::SolveStatus::SAT => {
@@ -36,8 +45,15 @@ fn main() {
                 .map(|l| l.to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("{}", display_str);
+            info!("{}", display_str);
         }
         solver::types::SolveStatus::UNSAT => println!("UNSAT"),
     }
+    let file = Path::new(&args.path).file_name().unwrap();
+    println!(
+        "[{}] Status: {}\tElapsed: {:#?}",
+        file.to_str().unwrap(),
+        res,
+        elapsed
+    );
 }

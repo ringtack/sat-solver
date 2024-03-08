@@ -1,14 +1,14 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitXor, Not, Shr};
 
-use ordered_float::NotNan;
+use ordered_float::OrderedFloat;
 
 /// Representations for LBD, DL, etc. so I'm consistent
 pub type LBD = u16;
 pub type DecisionLevel = u16;
 
 /// Let us use f64s as Ord
-pub type F64 = NotNan<f64>;
+pub type F64 = OrderedFloat<f64>;
 
 /// Representation of a variable, so I don't forget
 pub type Var = i64;
@@ -120,6 +120,16 @@ impl Default for LBool {
     }
 }
 
+impl Display for LBool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LBool::True => write!(f, "LTrue"),
+            LBool::False => write!(f, "LFalse"),
+            LBool::Undef => write!(f, "LUndef"),
+        }
+    }
+}
+
 impl BitXor for LBool {
     type Output = Self;
     fn bitxor(self, rhs: Self) -> LBool {
@@ -145,6 +155,12 @@ pub enum SolveStatus {
     Unknown,
     SAT,
     UNSAT,
+}
+
+impl Display for SolveStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 // #[derive(Clone, Debug, Copy)]

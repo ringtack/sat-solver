@@ -12,13 +12,13 @@ pub struct SATInstance {
 
 impl Debug for SATInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "n_vars: {}\tn_clauses: {}", self.n_vars, self.n_clauses);
+        writeln!(f, "n_vars: {}\tn_clauses: {}", self.n_vars, self.n_clauses).unwrap();
         for c in &self.clauses {
-            write!(f, "Clause:");
+            write!(f, "Clause:").unwrap();
             for l in &c.lits {
-                write!(f, " {l}");
+                write!(f, " {l}").unwrap();
             }
-            writeln!(f);
+            writeln!(f).unwrap();
         }
         writeln!(f)
     }

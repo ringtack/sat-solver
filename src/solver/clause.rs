@@ -84,7 +84,7 @@ pub struct Clause {
     /// Whether clause is protected (i.e. just added this deletion cycle)
     pub protected: bool,
     /// TODO: (probably won't need) collect at next GC
-    pub _garbage: bool,
+    pub garbage: bool,
 }
 
 impl Clause {
@@ -99,7 +99,7 @@ impl Clause {
             act: 0.,
             learnt,
             protected: false,
-            _garbage: false,
+            garbage: false,
         }
     }
 
@@ -118,7 +118,7 @@ impl Clause {
             act: 0.,
             learnt,
             protected: false,
-            _garbage: false,
+            garbage: false,
         }
     }
 }

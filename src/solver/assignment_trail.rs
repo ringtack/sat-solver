@@ -17,7 +17,6 @@ pub struct AssignmentStack {
 impl AssignmentStack {
     pub fn new(n_vars: usize) -> Self {
         Self {
-            // TODO: maybe try with_capacity?
             trail: Vec::with_capacity(n_vars),
             dl_delim_idxs: Vec::new(),
             bcp_idx: 0,

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Solver imports
 pub mod cdcl_solver;
 

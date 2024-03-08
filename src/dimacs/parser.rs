@@ -3,8 +3,7 @@ use fxhash::FxHashSet;
 use log::debug;
 use std::{
     fs::File,
-    io::{self, BufRead, BufReader, Error, ErrorKind},
-    net::ToSocketAddrs,
+    io::{BufRead, BufReader, Error, ErrorKind},
     path::Path,
 };
 
@@ -54,7 +53,7 @@ impl DimacsParser {
             let line = line?;
             let tokens = line.split_whitespace().collect::<Vec<_>>();
             // Skip comments
-            if tokens[0].starts_with("c") {
+            if tokens.len() == 0 || tokens[0].starts_with("c") {
                 continue;
             }
             // Verify format
