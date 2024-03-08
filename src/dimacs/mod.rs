@@ -1,2 +1,2 @@
-pub mod sat_instance;
 pub mod parser;
+pub mod sat_instance;
