@@ -76,6 +76,12 @@ fn main() {
             if cfg.restart {
                 cfg.restart = i % 2 == 0;
             }
+            // For first two, don't use random decisions
+            if cfg.decision_policy.random_var.is_some() {
+                if i < 2 {
+                    cfg.decision_policy.random_var = None
+                }
+            }
 
             let mut solver = CDCLSolver::new(cfg, instance);
             let start = Instant::now();
