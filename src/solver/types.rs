@@ -2,10 +2,10 @@ use std::fmt::Display;
 use std::ops::{BitAnd, BitXor, Not, Shr};
 use std::time::Duration;
 
-use log::info;
+
 use ordered_float::OrderedFloat;
 
-use crate::solver::util::vec_to_str;
+
 
 /// Representations for LBD, DL, etc. so I'm consistent
 pub type LBD = u16;

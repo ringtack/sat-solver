@@ -1,8 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    thread,
-    time::Instant,
-};
+use std::{path::PathBuf, thread};
 
 use clap::Parser;
 use crossbeam::channel;

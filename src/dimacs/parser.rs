@@ -4,7 +4,7 @@ use log::debug;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Error, ErrorKind},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use super::sat_instance::{Clause, Literal, SATInstance};

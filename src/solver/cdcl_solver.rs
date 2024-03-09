@@ -586,7 +586,7 @@ impl CDCLSolver {
             //     self.acts.iter().max().unwrap()
             // );
 
-            let mut polarity = false;
+            let polarity;
             if self.dh_conf.rand_pol && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
                 polarity = rand::thread_rng().gen_bool(0.5);
             } else {
