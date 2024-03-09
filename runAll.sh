@@ -64,6 +64,9 @@ if [[ -n $PGO ]]; then
   echo "Recompiling with PGO optimization"
   RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" \
       cargo build --release
+else
+  # Compile without PGO optimization
+  cargo build --release
 fi
 
 # Generate random output file
