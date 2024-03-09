@@ -1227,10 +1227,20 @@ impl CDCLSolver {
     /// Bumps the activity of the variable. Returns whether activity scaling is needed.
     fn bump_var_activity(&mut self, v: Var) {
         let var = v as usize;
-        self.acts[var] *= self.dh_conf.inc_var;
+        let mut rescale = false;
+
+        // Don't cause it to overflow/become NaN by checking beforehand
+        if !(self.acts[var] * self.dh_conf.inc_var).is_finite() {
+            rescale = true;
+        } else {
+            self.acts[var] *= self.dh_conf.inc_var;
+            if self.acts[var] >= OrderedFloat(self.dh_conf.rescale_lim) {
+                rescale = true;
+            }
+        }
+
         // If exceeds limit, rescale all activities and rebuild heap.
-        let lim = OrderedFloat(self.dh_conf.rescale_lim);
-        if self.acts[var] >= lim {
+        if rescale {
             debug!(
                 "Got act {} (inc var {}), rescaling variables by {}",
                 self.acts[var], self.dh_conf.inc_var, self.dh_conf.rescale_f
@@ -1266,12 +1276,20 @@ impl CDCLSolver {
 
     /// Decays the clause activity scale factor (i.e. makes others less active comparatively).
     fn decay_clause_activity(&mut self) {
-        self.cd_conf.inc_var *= self.cd_conf.f;
+        if !(self.cd_conf.inc_var * self.cd_conf.f).is_finite() {
+            self.cd_conf.inc_var = 1.;
+        } else {
+            self.cd_conf.inc_var *= self.cd_conf.f;
+        }
     }
 
     /// Decays the variable activity scale factor (i.e. makes others less active comparatively).
     fn decay_var_activity(&mut self) {
-        self.dh_conf.inc_var *= self.dh_conf.f;
+        if !(self.dh_conf.inc_var * self.cd_conf.f).is_finite() {
+            self.dh_conf.inc_var = 1.;
+        } else {
+            self.dh_conf.inc_var *= self.dh_conf.f;
+        }
     }
 
     /// Simple wrappers around field methods.
