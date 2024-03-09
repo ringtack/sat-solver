@@ -1,7 +1,11 @@
 use std::fmt::Display;
 use std::ops::{BitAnd, BitXor, Not, Shr};
+use std::time::Duration;
 
+use log::info;
 use ordered_float::OrderedFloat;
+
+use crate::solver::util::vec_to_str;
 
 /// Representations for LBD, DL, etc. so I'm consistent
 pub type LBD = u16;
@@ -160,6 +164,36 @@ pub enum SolveStatus {
 impl Display for SolveStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+pub struct SolveResult {
+    pub instance: String,
+    pub status: SolveStatus,
+    pub elapsed: Duration,
+    pub assignments: Vec<Lit>,
+}
+
+impl SolveResult {
+    pub fn result_str(self) -> String {
+        let mut str = format!(
+            r#""Instance": "{}", "Time": {:.2}, "Result": "{}""#,
+            self.instance,
+            self.elapsed.as_secs_f64(),
+            self.status
+        );
+        if let SolveStatus::UNSAT = self.status {
+            str += "}";
+        } else {
+            let display_str = &self
+                .assignments
+                .iter()
+                .map(|l| String::from(format!("{} {}", l.var(), !l.sign())))
+                .collect::<Vec<_>>()
+                .join(" ");
+            str += &format!(r#", "Solution": "{}"}}"#, display_str);
+        };
+        str
     }
 }
 

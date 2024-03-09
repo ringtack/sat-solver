@@ -20,7 +20,7 @@ use super::{
     clause::{Clause, ClauseAllocator, ClauseKey, Reason},
     config::{ClauseDeletionConfig, DecisionConfig, OptConfig, RestartConfig, SolverConfig},
     stats::RuntimeStats,
-    types::{DecisionLevel, LBool, Lit, SolveStatus, Var, F64, LBD, L_UNDEF, V_UNDEF},
+    types::{DecisionLevel, LBool, Lit, SolveResult, SolveStatus, Var, F64, LBD, L_UNDEF, V_UNDEF},
     watch_list::{WatchList, Watcher},
 };
 
@@ -99,6 +99,8 @@ pub struct CDCLSolver {
     stats: RuntimeStats,
     /// Elapsed time.
     start: Instant,
+    /// Instance
+    instance: String,
 
     // TODO: hacky, change later
     until_next_log: i64,
@@ -120,10 +122,10 @@ impl CDCLSolver {
         let n_vars = var as usize;
         let n_lits = lits_from_vars(n_vars);
         // Construct activity heap
-        let acts = vec![OrderedFloat(0.); n_vars];
+        let acts = vec![OrderedFloat(1.); n_vars];
         let mut act_heap = BinaryHeap::with_capacity(n_vars);
         for v in 0..n_vars {
-            act_heap.push(v as Var, OrderedFloat(0.));
+            act_heap.push(v as Var, OrderedFloat(1.));
         }
 
         let mut solver = Self {
@@ -150,6 +152,7 @@ impl CDCLSolver {
             learnt_lits: vec![],
             stats: RuntimeStats::default(),
             start: Instant::now(),
+            instance: instance.instance.clone(),
 
             until_next_log: 0,
         };
@@ -185,7 +188,7 @@ impl CDCLSolver {
         SolveStatus::Unknown
     }
 
-    pub fn solve(&mut self) -> SolveStatus {
+    pub fn solve(&mut self) -> SolveResult {
         loop {
             self.stats.starts += 1;
             let mut restart_lim = 0;
@@ -195,7 +198,12 @@ impl CDCLSolver {
             debug!("Restarting execution with lim {restart_lim} (0 means infinite)");
             let res = self.search(restart_lim);
             if res != SolveStatus::Unknown {
-                return res;
+                return SolveResult {
+                    instance: self.instance.clone(),
+                    status: res,
+                    elapsed: self.start.elapsed(),
+                    assignments: self.assignments(),
+                };
             }
         }
     }
@@ -538,7 +546,6 @@ impl CDCLSolver {
     // Decide the next branch following activity heuristic.
     fn decide(&mut self) -> Option<Lit> {
         let mut next = V_UNDEF;
-        // TODO: implement random decisions
         if self.dh_conf.rand_var && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
             self.stats.rand_decisions += 1;
             next = rand::thread_rng().gen_range(0..(self.n_vars() as i64));
@@ -559,7 +566,7 @@ impl CDCLSolver {
             None
         } else {
             let mut polarity = false;
-            if self.dh_conf.rand_pol {
+            if self.dh_conf.rand_pol && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
                 polarity = rand::thread_rng().gen_bool(0.5);
             } else {
                 // Get polarity from previous decisions
@@ -574,7 +581,7 @@ impl CDCLSolver {
     fn analyze_conflicts(&mut self, ck: ClauseKey) -> (Vec<Lit>, DecisionLevel) {
         // Record the current debug_asserting literal.
         let mut a_lit = None;
-        let mut vars_to_bump = Vec::with_capacity(16);
+        let mut vars_to_bump = Vec::with_capacity(32);
         self.learnt_lits.clear();
         self.learnt_lits.resize(1, Lit::default());
         self.seen_to_clear.clear();

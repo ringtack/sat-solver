@@ -13,9 +13,5 @@ E_BADARGS=65
 input=$1
 shift 1
 
-echo "$@"
-
-# Pass input args to binary
-
 # Pass remaining args to binary
 ./target/release/project1 -f "$input" "$@"

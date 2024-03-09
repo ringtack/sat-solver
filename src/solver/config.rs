@@ -16,7 +16,7 @@ pub const DELETION_SORT_ORDER_DEFAULT: [DeletionSortOption; 3] = [
 ];
 
 // Glucose uses 2000+300x, but in case my sorting is wrong we'll keep a lot more
-pub const LBD_DELETION_DEFAULT: DeletionSortOption = DeletionSortOption::LBD(5000, 1000);
+pub const LBD_DELETION_DEFAULT: DeletionSortOption = DeletionSortOption::LBD(2000, 300);
 pub const ACTIVITY_DELETION_DEFAULT: DeletionSortOption =
     DeletionSortOption::Activity(1.0, 1.0 / 0.999, 20);
 

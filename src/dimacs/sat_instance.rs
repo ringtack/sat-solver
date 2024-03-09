@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, path::PathBuf};
 
 use fxhash::FxHashSet;
 
@@ -9,6 +9,7 @@ pub struct SATInstance {
     pub clauses: Vec<Clause>,
     // (Positive) list of all variables in the instance
     pub vars: FxHashSet<Variable>,
+    pub instance: String,
 }
 
 impl Debug for SATInstance {

@@ -96,7 +96,7 @@ impl Clause {
             lits: lits.to_vec(),
             ck: ClauseKey::null(),
             lbd: 0,
-            act: 0.,
+            act: 1.,
             learnt,
             protected: false,
             garbage: false,

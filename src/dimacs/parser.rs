@@ -4,19 +4,20 @@ use log::debug;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Error, ErrorKind},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use super::sat_instance::{Clause, Literal, SATInstance};
 
 pub struct DimacsParser {
     file: File,
+    path: PathBuf,
 }
 
 impl DimacsParser {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<DimacsParser> {
-        let file = File::open(path)?;
-        Ok(Self { file })
+    pub fn new(path: PathBuf) -> Result<DimacsParser> {
+        let file = File::open(&path)?;
+        Ok(Self { file, path })
     }
 
     // Parses the file provided during construction into a SAT Instance.
@@ -47,6 +48,7 @@ impl DimacsParser {
             n_clauses,
             clauses: Vec::with_capacity(n_clauses),
             vars: FxHashSet::default(),
+            instance: String::from(self.path.file_name().unwrap().to_str().unwrap()),
         };
         // Parse clauses
         for line in lines {

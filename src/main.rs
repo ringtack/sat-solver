@@ -1,4 +1,8 @@
-use std::{path::Path, thread, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    thread,
+    time::Instant,
+};
 
 use clap::Parser;
 use crossbeam::channel;
@@ -42,11 +46,11 @@ fn main() {
 
     log::set_max_level(log::LevelFilter::Trace);
     env_logger::builder()
-        .filter(None, log::LevelFilter::Info)
+        .filter(None, log::LevelFilter::Off)
         .init();
 
     // Get instance
-    let dimacs_parser = DimacsParser::new(&args.file).unwrap();
+    let dimacs_parser = DimacsParser::new(PathBuf::from(args.file)).unwrap();
     let instance = dimacs_parser.parse().unwrap();
 
     // Initialize solver
@@ -64,7 +68,14 @@ fn main() {
     info!("Config: {:#?}", cfg);
 
     // If multithreaded, spawn that many threads to send to a channel
-    let (s, r) = channel::unbounded();
+    let (s, r) = channel::bounded(args.mt);
+    // Automatically take care of randomizing stuff if multithreaded
+    if args.mt > 1 {
+        cfg.restart = true;
+        cfg.decision_policy.random_var = Some(0.0025);
+        cfg.decision_policy.random_pol = true;
+    }
+
     for i in 0..args.mt {
         info!("Starting solve attempt in solver {}...", i);
 
@@ -84,33 +95,11 @@ fn main() {
             }
 
             let mut solver = CDCLSolver::new(cfg, instance);
-            let start = Instant::now();
             let res = solver.solve();
-            let elapsed = start.elapsed();
-            s.send((solver, res, elapsed)).unwrap();
+            s.send(res).unwrap();
         });
     }
 
-    let (solver, res, elapsed) = r.recv().unwrap();
-    match res {
-        solver::types::SolveStatus::Unknown => panic!("Solver should never return Unknown"),
-        solver::types::SolveStatus::SAT => {
-            // Get all assignments.
-            let assignments = solver.assignments();
-            let display_str = assignments
-                .iter()
-                .map(|l| l.to_string())
-                .collect::<Vec<_>>()
-                .join(" ");
-            info!("{}", display_str);
-        }
-        solver::types::SolveStatus::UNSAT => println!("UNSAT"),
-    }
-    let file = Path::new(&args.file).file_name().unwrap();
-    println!(
-        "[{}] Status: {}\tElapsed: {:#?}",
-        file.to_str().unwrap(),
-        res,
-        elapsed
-    );
+    let res = r.recv().unwrap();
+    println!("{}", res.result_str());
 }
