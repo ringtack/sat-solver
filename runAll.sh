@@ -40,8 +40,23 @@ touch $logFile
 rustup upgrade
 rustup default stable
 
-# Build release version
-cargo build --release
+
+## PGO Optimization
+rustup component add llvm-tools-preview
+
+# Remove the old profile data
+rm -rf ./tmp/pgo-data
+# Compile with PGO instrumentation
+RUSTFLAGS="-Cprofile-generate=./tmp/pgo-data" cargo build --release
+# Run the program on three inputs to gather profile data:
+./target/release/project1 -f input/C1065_064.cnf
+./target/release/project1 -f input/U50_1065_038.cnf
+./target/release/project1 -f input/U50_4450_035.cnf
+# Merge profile data together
+llvm-profdata merge -o ./tmp/pgo-data/merged.profdata ./tmp/pgo-data
+# Use profile data to optimize the program
+RUSTFLAGS="-Cprofile-use=./tmp/pgo-data/merged.profdata" \
+    cargo build --release
 
 # Generate random output file
 outputFile=$(mktemp)
