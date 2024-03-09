@@ -55,8 +55,8 @@ echo "Running the program on three inputs (C1065_064.cnf, U50_1065_038.cnf, and 
 echo "C1065_064.cnf profile done"
 ./target/release/project1 -f input/U50_1065_038.cnf > /dev/null 2>&1
 echo "U50_1065_038.cnf profile done"
-./target/release/project1 -f input/U50_4450_035.cnf > /dev/null 2>&1
-echo "U50_4450_035.cnf profile done"
+# ./target/release/project1 -f input/U50_4450_035.cnf > /dev/null 2>&1
+# echo "U50_4450_035.cnf profile done"
 
 # Merge profile data together
 llvm-profdata merge -o ./tmp/pgo-data/merged.profdata ./tmp/pgo-data
