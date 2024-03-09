@@ -8,7 +8,7 @@ pub const LUBY_DEFAULT: RestartPolicy = RestartPolicy::Luby(256, 1.25);
 pub const GLUCOSE_DEFAULT: RestartPolicy = RestartPolicy::Glucose(50, 0.8, 5000, 1.4);
 
 // Clause deletion configs.
-pub const KEEP_F_DEFAULT: f64 = 0.75; // from satch
+pub const KEEP_F_DEFAULT: f64 = 0.5; // from satch
 pub const DELETION_SORT_ORDER_DEFAULT: [DeletionSortOption; 3] = [
     LBD_DELETION_DEFAULT,
     ACTIVITY_DELETION_DEFAULT,

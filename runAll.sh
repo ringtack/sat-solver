@@ -36,6 +36,11 @@ fi
 # Create the log file
 touch $logFile
 
+# Upgrade rust if necessary
+rustup upgrade
+rustup default stable
+
+# Build release version
 cargo build --release
 
 # Generate random output file
