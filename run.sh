@@ -14,4 +14,7 @@ input=$1
 shift 1
 
 # Pass remaining args to binary
+filename=$(basename -- "$input")
+filename="${filename%.*}"
+# flamegraph -o flamegraphs/"$filename".svg -- ./target/release/project1 -f "$input" "$@"
 ./target/release/project1 -f "$input" "$@"
