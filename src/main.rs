@@ -92,7 +92,7 @@ fn main() {
 
             let mut solver = CDCLSolver::new(cfg, instance);
             let res = solver.solve();
-            s.send(res).unwrap();
+            let _ = s.send(res);
         });
     }
 
