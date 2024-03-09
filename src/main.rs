@@ -96,6 +96,8 @@ fn main() {
         });
     }
 
-    let res = r.recv().unwrap();
-    println!("{}", res.result_str());
+    for res in r {
+        println!("{}", res.result_str());
+        return;
+    }
 }
