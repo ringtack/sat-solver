@@ -46,7 +46,7 @@ fn main() {
 
     log::set_max_level(log::LevelFilter::Trace);
     env_logger::builder()
-        .filter(None, log::LevelFilter::Off)
+        .filter(None, log::LevelFilter::Info)
         .init();
 
     // Get instance

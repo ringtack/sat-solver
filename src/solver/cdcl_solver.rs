@@ -545,6 +545,8 @@ impl CDCLSolver {
 
     // Decide the next branch following activity heuristic.
     fn decide(&mut self) -> Option<Lit> {
+        let mut _act = OrderedFloat(0.);
+
         let mut next = V_UNDEF;
         if self.dh_conf.rand_var && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
             self.stats.rand_decisions += 1;
@@ -559,12 +561,31 @@ impl CDCLSolver {
                 next = V_UNDEF;
                 break;
             }
-            (next, _) = self.act_heap.pop_with_key().unwrap();
+            (next, _act) = self.act_heap.pop_with_key().unwrap();
         }
         // If undef, denote as such
         if next == V_UNDEF {
             None
         } else {
+            // Check that act was actually max act
+            // debug_assert!(
+            //     self.acts
+            //         .iter()
+            //         .enumerate()
+            //         .map(|(v, act)| {
+            //             if self.assigned[v] != LBool::Undef {
+            //                 _act >= *act
+            //             } else {
+            //                 true
+            //             }
+            //         })
+            //         .all(|b| b),
+            //     "did not get max act (got {} for {}, expected {})",
+            //     _act,
+            //     next,
+            //     self.acts.iter().max().unwrap()
+            // );
+
             let mut polarity = false;
             if self.dh_conf.rand_pol && rand::thread_rng().gen::<f64>() < self.dh_conf.rand_f {
                 polarity = rand::thread_rng().gen_bool(0.5);
@@ -1210,10 +1231,30 @@ impl CDCLSolver {
         // If exceeds limit, rescale all activities and rebuild heap.
         let lim = OrderedFloat(self.dh_conf.rescale_lim);
         if self.acts[var] >= lim {
+            debug!(
+                "Got act {} (inc var {}), rescaling variables by {}",
+                self.acts[var], self.dh_conf.inc_var, self.dh_conf.rescale_f
+            );
             for a in &mut self.acts {
-                *a *= self.dh_conf.rescale_f;
+                // If NaN/Inf, manually reset :/ makes EVSIDS kinda unreliable ugh
+                if !a.is_finite() {
+                    *a = OrderedFloat(1.);
+                } else {
+                    *a *= self.dh_conf.rescale_f;
+                }
             }
-            self.dh_conf.inc_var *= self.dh_conf.rescale_f;
+            // If not finite, reset inc var
+            if !self.dh_conf.inc_var.is_finite() {
+                self.dh_conf.inc_var = 1.;
+            } else {
+                self.dh_conf.inc_var *= self.dh_conf.rescale_f;
+            }
+
+            debug!(
+                "new acc: {}, new inc_var: {}",
+                self.acts[var], self.dh_conf.inc_var
+            );
+
             self.rebuild_heap();
         }
 

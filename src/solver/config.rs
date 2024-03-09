@@ -4,7 +4,7 @@ use ringbuf::HeapRb;
 use super::types::LBD;
 
 // Restart policy configs.
-pub const LUBY_DEFAULT: RestartPolicy = RestartPolicy::Luby(256, 1.5);
+pub const LUBY_DEFAULT: RestartPolicy = RestartPolicy::Luby(256, 1.25);
 pub const GLUCOSE_DEFAULT: RestartPolicy = RestartPolicy::Glucose(50, 0.8, 5000, 1.4);
 
 // Clause deletion configs.
@@ -22,7 +22,7 @@ pub const ACTIVITY_DELETION_DEFAULT: DeletionSortOption =
 
 // Decision policy configs.
 pub const VSIDS_DEFAULT: HeuristicOption = HeuristicOption::VSIDS(256, 2);
-pub const EVSIDS_DEFAULT: HeuristicOption = HeuristicOption::EVSIDS(1.0, 1. / 0.95, 100);
+pub const EVSIDS_DEFAULT: HeuristicOption = HeuristicOption::EVSIDS(1.0, 1. / 0.975, 100);
 
 #[derive(Clone, Debug)]
 pub struct SolverConfig {
