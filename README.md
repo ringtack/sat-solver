@@ -16,7 +16,7 @@ To build the program:
 $ ./compile.sh
 ```
 
-This updates the Rust toolchain to the latest stable version, then builds a release binary (`./target/release/sat-solver`).
+This updates the Rust toolchain to the latest stable version, then builds a release binary (`./sat-solver`).
 
 > For [profile-guided optimization](https://doc.rust-lang.org/rustc/profile-guided-optimization.html) (PGO) support, set the environment variable `PGO=1`.
 
