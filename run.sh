@@ -3,12 +3,11 @@
 ########################################
 ############# CSCI 2951-O ##############
 ########################################
-E_BADARGS=65
-# if [ $# -ne 1 ]
-# then
-# 	echo "Usage: `basename $0` <input>"
-# 	exit $E_BADARGS
-# fi
+if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+    echo -e "Usage: $(basename "$0") <input> [<binary args...>]"
+    echo -e "For flamegraphs, set the environment variable \`FLAMEGRAPH=1\`."
+    exit 1
+fi
 
 input=$1
 shift 1
@@ -16,5 +15,10 @@ shift 1
 # Pass remaining args to binary
 filename=$(basename -- "$input")
 filename="${filename%.*}"
-# flamegraph -o flamegraphs/"$filename".svg -- ./target/release/project1 -f "$input" "$@"
-./target/release/project1 -f "$input" "$@"
+
+if [[ -n $FLAMEGRAPH ]]; then
+    echo -e "Running flamegraph on execution..."
+    flamegraph -o flamegraphs/"$filename".svg -- ./target/release/sat-solver -f "$input" "$@"
+else 
+    ./target/release/sat-solver -f "$input" "$@"
+fi
