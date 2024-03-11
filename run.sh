@@ -18,7 +18,7 @@ filename="${filename%.*}"
 
 if [[ -n $FLAMEGRAPH ]]; then
     echo -e "Running flamegraph on execution..."
-    flamegraph -o flamegraphs/"$filename".svg -- ./target/release/sat-solver -f "$input" "$@"
+    flamegraph -o flamegraphs/"$filename".svg -- ./sat-solver -f "$input" "$@"
 else 
-    ./target/release/sat-solver -f "$input" "$@"
+    ./sat-solver -f "$input" "$@"
 fi

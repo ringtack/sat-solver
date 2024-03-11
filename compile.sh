@@ -60,3 +60,4 @@ else
 fi
 
 echo "Compilation done. To run all inputs, see \`./runAll.sh\`; for a specific input file, use \`./run.sh\`."
+cp ./target/release/sat-solver ./sat-solver
